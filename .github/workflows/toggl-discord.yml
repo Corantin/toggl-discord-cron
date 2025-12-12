@@ -2,6 +2,11 @@ name: Toggl to Discord
 
 on:
   workflow_dispatch:
+    inputs:
+      run_date:
+        description: 'Date to report (ISO, leave as "today" to use current day)'
+        required: false
+        default: today
   schedule:
     - cron: "0 8 * * *" # 08:00 UTC every day
 
@@ -32,4 +37,5 @@ jobs:
           DISCORD_THREAD_ID: ${{ secrets.DISCORD_THREAD_ID }}
           TOGGL_PROJECT_ID: ${{ secrets.TOGGL_PROJECT_ID }}
           DRY_RUN: ${{ secrets.DRY_RUN }}
+          RUN_DATE: ${{ github.event.inputs.run_date }}
         run: pnpm start

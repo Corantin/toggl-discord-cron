@@ -12,6 +12,7 @@ const MIN_ENTRY_DATE = DateTime.fromISO('2025-12-04T00:00:00Z').toUTC(); // igno
 const TOGGL_PROJECT_ID = process.env.TOGGL_PROJECT_ID
   ? Number(process.env.TOGGL_PROJECT_ID)
   : undefined;
+const RUN_DATE = process.env.RUN_DATE; // optional ISO date or "today" for current day in TZ
 const DRY_RUN =
   process.env.DRY_RUN === '1' || process.env.DRY_RUN === 'true' || process.env.DRY_RUN === 'yes';
 
@@ -182,7 +183,16 @@ async function postToDiscord(content) {
 
 async function main() {
   try {
-    const now = DateTime.now().setZone(TIMEZONE);
+    let now;
+    if (!RUN_DATE || RUN_DATE.toLowerCase() === 'today') {
+      now = DateTime.now().setZone(TIMEZONE);
+    } else {
+      const parsed = DateTime.fromISO(RUN_DATE, { zone: TIMEZONE });
+      if (!parsed.isValid) {
+        throw new Error(`Invalid RUN_DATE provided: ${RUN_DATE}`);
+      }
+      now = parsed;
+    }
     const dayStart = now.startOf('day');
     const todayEntries = await getTimeEntries(dayStart, now);
 

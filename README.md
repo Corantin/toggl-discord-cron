@@ -15,6 +15,7 @@ Add these secrets in the repository settings for Actions:
 - `DISCORD_THREAD_ID` – optional; thread id if you want the webhook to post inside a specific thread.
 - `TOGGL_PROJECT_ID` – optional; restricts reporting to a single project id (e.g., `203141064`).
 - `DRY_RUN` – optional; set to `true` to log the message instead of posting to Discord.
+- `RUN_DATE` – optional ISO date (e.g., `2025-12-05`) or `today` to control which day is reported.
 
 ## Running locally
 ```bash
@@ -34,3 +35,4 @@ The workflow at `.github/workflows/toggl-discord.yml` runs daily at 08:00 UTC an
 - Labels/tags on entries are included; the message lists entries grouped under each label with a single total for the day.
 - Set `DRY_RUN=true` to print the would-be Discord message and skip posting.
 - Day boundary uses America/New_York (EST/EDT); “today” is evaluated in that timezone before querying Toggl.
+- The workflow_dispatch input `run_date` defaults to `today`; provide an ISO date to report a different day.
