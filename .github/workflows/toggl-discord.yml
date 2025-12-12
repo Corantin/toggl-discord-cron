@@ -1,0 +1,34 @@
+name: Toggl to Discord
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8 * * *" # 08:00 UTC every day
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Post Toggl summary to Discord
+        env:
+          TOGGL_TOKEN: ${{ secrets.TOGGL_TOKEN }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          TOGGL_WORKSPACE_ID: ${{ secrets.TOGGL_WORKSPACE_ID }}
+          DISCORD_THREAD_ID: ${{ secrets.DISCORD_THREAD_ID }}
+          TOGGL_PROJECT_ID: ${{ secrets.TOGGL_PROJECT_ID }}
+          DRY_RUN: ${{ secrets.DRY_RUN }}
+        run: pnpm start
