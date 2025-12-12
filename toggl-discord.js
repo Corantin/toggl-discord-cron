@@ -155,6 +155,9 @@ function buildDiscordMessage({
       }
     }
 
+    if (bodyLines.length) {
+      bodyLines.push('');
+    }
     bodyLines.push(`Total: **${formatDuration(todayTotal)}**`);
   }
 
