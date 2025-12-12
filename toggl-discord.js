@@ -84,10 +84,6 @@ function formatDuration(totalSeconds) {
   return `${seconds}s`;
 }
 
-function totalDurationSeconds(entries) {
-  return (entries || []).reduce((sum, entry) => sum + entryDurationSeconds(entry), 0);
-}
-
 function summarizeByTag(entries) {
   const totals = new Map();
 
@@ -110,6 +106,13 @@ function summarizeByTag(entries) {
     .sort((a, b) => b.seconds - a.seconds);
 }
 
+function totalRoundedSeconds(entries) {
+  return (entries || []).reduce(
+    (sum, entry) => sum + roundToNearestFiveMinutes(entryDurationSeconds(entry)),
+    0,
+  );
+}
+
 function groupEntriesByTag(entries) {
   const grouped = new Map();
   for (const entry of entries || []) {
@@ -130,27 +133,34 @@ function filterEntriesForProject(entries) {
 function buildDiscordMessage({
   todayEntries,
   todayTags,
+  todayLabel,
+  todayTotal,
 }) {
-  const lines = ['⏱️ **Toggl Summary (today)**'];
+  const header = `**${todayLabel}**`;
+  const bodyLines = [];
 
   if (!todayEntries.length) {
-    lines.push('• No entries yet');
-    return lines.join('\n');
-  }
+    bodyLines.push('• No entries yet');
+  } else {
+    const grouped = groupEntriesByTag(todayEntries);
 
-  const grouped = groupEntriesByTag(todayEntries);
-
-  for (const tag of todayTags) {
-    const entriesForTag = grouped.get(tag.name) || [];
-    lines.push(`**${tag.name} – ${formatDuration(tag.seconds)}**`);
-    for (const entry of entriesForTag) {
-      const desc = entry.description || 'No description';
-      const roundedSeconds = roundToNearestFiveMinutes(entryDurationSeconds(entry));
-      lines.push(`• ${desc} – ${formatDuration(roundedSeconds)}`);
+    for (const tag of todayTags) {
+      const entriesForTag = grouped.get(tag.name) || [];
+      bodyLines.push(`**${tag.name}**`);
+      for (const entry of entriesForTag) {
+        const desc = entry.description || 'No description';
+        const roundedSeconds = roundToNearestFiveMinutes(entryDurationSeconds(entry));
+        bodyLines.push(`• ${desc} ⏱️  ${formatDuration(roundedSeconds)}`);
+      }
     }
+
+    bodyLines.push(`Total: **${formatDuration(todayTotal)}**`);
   }
 
-  return lines.join('\n');
+  const maxLen = Math.max(header.length, ...bodyLines.map((l) => l.length));
+  const separator = '-'.repeat(maxLen);
+
+  return [header, separator, ...bodyLines].join('\n');
 }
 
 async function postToDiscord(content) {
@@ -186,10 +196,14 @@ async function main() {
     }
 
     const todayTags = summarizeByTag(filteredTodayEntries);
+    const todayLabel = now.toFormat('LLL dd'); // e.g., Dec 12
+    const todayTotal = totalRoundedSeconds(filteredTodayEntries);
 
     const message = buildDiscordMessage({
       todayEntries: filteredTodayEntries,
       todayTags,
+      todayLabel,
+      todayTotal,
     });
 
     if (DRY_RUN) {

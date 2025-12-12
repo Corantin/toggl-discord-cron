@@ -31,6 +31,6 @@ The workflow at `.github/workflows/toggl-discord.yml` runs daily at 08:00 UTC an
 - The script ignores time entries before 2025-12-04 to avoid processing older Toggl data.
 - When `TOGGL_PROJECT_ID` is set, only that project’s entries are included in the report.
 - If there are no entries today, the workflow exits without posting to Discord.
-- Labels/tags on entries are included; the message lists entries grouped under each label with per-label totals.
+- Labels/tags on entries are included; the message lists entries grouped under each label with a single total for the day.
 - Set `DRY_RUN=true` to print the would-be Discord message and skip posting.
 - Day boundary uses America/New_York (EST/EDT); “today” is evaluated in that timezone before querying Toggl.
