@@ -12,7 +12,7 @@ const MIN_ENTRY_DATE = DateTime.fromISO('2025-12-04T00:00:00Z').toUTC(); // igno
 const TOGGL_PROJECT_ID = process.env.TOGGL_PROJECT_ID
   ? Number(process.env.TOGGL_PROJECT_ID)
   : undefined;
-const RUN_DATE = process.env.RUN_DATE; // optional ISO date or "today" for current day in TZ
+const RUN_DATE = process.env.RUN_DATE; // optional YYYY-MM-DD date, "today", or "yesterday" for current day in TZ
 const DRY_RUN =
   process.env.DRY_RUN === '1' || process.env.DRY_RUN === 'true' || process.env.DRY_RUN === 'yes';
 
@@ -184,20 +184,31 @@ async function postToDiscord(content) {
   }
 }
 
+function parseRunDate(value) {
+  if (!value || value.toLowerCase() === 'today') {
+    return DateTime.now().setZone(TIMEZONE);
+  }
+
+  if (value.toLowerCase() === 'yesterday') {
+    return DateTime.now().setZone(TIMEZONE).minus({ days: 1 });
+  }
+
+  const trimmed = value.trim();
+  const parsed = DateTime.fromFormat(trimmed, 'yyyy-LL-dd', { zone: TIMEZONE });
+
+  if (!parsed.isValid) {
+    throw new Error(`Invalid RUN_DATE provided (expected YYYY-MM-DD): ${value}`);
+  }
+
+  return parsed;
+}
+
 async function main() {
   try {
-    let now;
-    if (!RUN_DATE || RUN_DATE.toLowerCase() === 'today') {
-      now = DateTime.now().setZone(TIMEZONE);
-    } else {
-      const parsed = DateTime.fromISO(RUN_DATE, { zone: TIMEZONE });
-      if (!parsed.isValid) {
-        throw new Error(`Invalid RUN_DATE provided: ${RUN_DATE}`);
-      }
-      now = parsed;
-    }
-    const dayStart = now.startOf('day');
-    const todayEntries = await getTimeEntries(dayStart, now);
+    const runDate = parseRunDate(RUN_DATE);
+    const dayStart = runDate.startOf('day');
+    const dayEnd = dayStart.plus({ days: 1 });
+    const todayEntries = await getTimeEntries(dayStart, dayEnd);
 
     const filteredTodayEntries = filterEntriesForProject(todayEntries);
 
@@ -209,7 +220,7 @@ async function main() {
     }
 
     const todayTags = summarizeByTag(filteredTodayEntries);
-    const todayLabel = now.toFormat('LLL dd'); // e.g., Dec 12
+    const todayLabel = runDate.toFormat('LLL dd'); // e.g., Dec 12
     const todayTotal = totalRoundedSeconds(filteredTodayEntries);
 
     const message = buildDiscordMessage({
