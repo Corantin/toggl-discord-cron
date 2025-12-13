@@ -126,6 +126,22 @@ function groupEntriesByTag(entries) {
   return grouped;
 }
 
+function aggregateByDescription(entries) {
+  const byDesc = new Map();
+
+  for (const entry of entries || []) {
+    const desc = entry.description || 'No description';
+    const roundedSeconds = roundToNearestFiveMinutes(entryDurationSeconds(entry));
+
+    if (!byDesc.has(desc)) byDesc.set(desc, 0);
+    byDesc.set(desc, byDesc.get(desc) + roundedSeconds);
+  }
+
+  return Array.from(byDesc.entries())
+    .map(([description, seconds]) => ({ description, seconds }))
+    .sort((a, b) => b.seconds - a.seconds);
+}
+
 function filterEntriesForProject(entries) {
   if (!TOGGL_PROJECT_ID) return entries || [];
   return (entries || []).filter((entry) => entry.project_id === TOGGL_PROJECT_ID);
@@ -147,11 +163,10 @@ function buildDiscordMessage({
 
     for (const tag of todayTags) {
       const entriesForTag = grouped.get(tag.name) || [];
+      const aggregated = aggregateByDescription(entriesForTag);
       bodyLines.push(`**${tag.name}**`);
-      for (const entry of entriesForTag) {
-        const desc = entry.description || 'No description';
-        const roundedSeconds = roundToNearestFiveMinutes(entryDurationSeconds(entry));
-        bodyLines.push(`• ${desc} ⏱️  ${formatDuration(roundedSeconds)}`);
+      for (const { description, seconds } of aggregated) {
+        bodyLines.push(`• ${description} ⏱️  ${formatDuration(seconds)}`);
       }
     }
 
