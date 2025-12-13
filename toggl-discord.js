@@ -224,12 +224,12 @@ async function postToDiscord(content) {
 }
 
 function parseRunDate(value) {
-  if (!value || value.toLowerCase() === "today") {
-    return DateTime.now().setZone(TIMEZONE);
+  if (!value || value.toLowerCase() === "yesterday") {
+    return DateTime.now().setZone(TIMEZONE).minus({ days: 1 });
   }
 
-  if (value.toLowerCase() === "yesterday") {
-    return DateTime.now().setZone(TIMEZONE).minus({ days: 1 });
+  if (value.toLowerCase() === "today") {
+    return DateTime.now().setZone(TIMEZONE);
   }
 
   const trimmed = value.trim();
