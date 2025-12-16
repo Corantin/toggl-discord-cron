@@ -86,7 +86,9 @@ function entryDurationSeconds(entry) {
 }
 
 function roundToNearestFiveMinutes(seconds) {
-  return Math.max(0, Math.round(seconds / 300) * 300);
+  // Enforce 5-minute minimum for any positive duration
+  if (seconds <= 0) return 0;
+  return Math.max(300, Math.round(seconds / 300) * 300);
 }
 
 function formatDuration(totalSeconds) {
