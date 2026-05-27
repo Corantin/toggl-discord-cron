@@ -251,7 +251,14 @@ function parseRunDate(value) {
 }
 
 function parseBackfillFromDate(value) {
-  const trimmed = value.trim();
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    throw new Error(
+      "Invalid BACKFILL_FROM_DATE provided (expected YYYY-MM-DD): empty value"
+    );
+  }
+
   const parsed = DateTime.fromFormat(trimmed, "yyyy-LL-dd", { zone: TIMEZONE });
 
   if (!parsed.isValid) {
@@ -295,7 +302,7 @@ async function reportForDate(runDate) {
 
 async function main() {
   try {
-    if (BACKFILL_FROM_DATE) {
+    if (BACKFILL_FROM_DATE?.trim()) {
       const startDate = parseBackfillFromDate(BACKFILL_FROM_DATE).startOf("day");
       const yesterday = DateTime.now()
         .setZone(TIMEZONE)
