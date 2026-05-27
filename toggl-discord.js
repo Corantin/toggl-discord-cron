@@ -302,6 +302,13 @@ async function main() {
         .minus({ days: 1 })
         .startOf("day");
 
+      if (startDate > yesterday) {
+        console.log(
+          "BACKFILL_FROM_DATE is after yesterday; skipping Discord posts."
+        );
+        return;
+      }
+
       for (
         let currentDate = startDate;
         currentDate <= yesterday;
