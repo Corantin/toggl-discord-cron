@@ -37,45 +37,202 @@ if (process.env.TOGGL_PROJECT_ID && Number.isNaN(TOGGL_PROJECT_ID)) {
 }
 
 const API_BASE = "https://api.track.toggl.com/api/v9";
+const REPORTS_API_BASE = "https://api.track.toggl.com/reports/api/v3";
 const authHeader = `Basic ${Buffer.from(`${TOGGL_TOKEN}:api_token`).toString(
   "base64"
 )}`;
 
+/**
+ * @typedef {Error & {status?: number, statusText?: string, body?: string}} RequestError
+ */
+
+/**
+ * @param {number} status
+ * @param {string} statusText
+ * @param {string} errorText
+ * @returns {RequestError}
+ */
+function buildRequestError(status, statusText, errorText) {
+  return Object.assign(
+    new Error(`Request failed ${status} ${statusText}: ${errorText}`),
+    {
+      status,
+      statusText,
+      body: errorText,
+    }
+  );
+}
+
+/**
+ * @param {string} responseText
+ */
+function parseJsonResponse(responseText) {
+  if (!responseText) return null;
+
+  try {
+    return JSON.parse(responseText);
+  } catch {
+    return responseText;
+  }
+}
+
+/**
+ * @param {unknown} error
+ */
+function isRateLimitError(error) {
+  if (!error) return false;
+  const requestError = /** @type {RequestError | undefined} */ (
+    typeof error === "object" ? error : undefined
+  );
+
+  if (requestError?.status === 429) return true;
+
+  const message = `${requestError?.message || ""} ${requestError?.body || ""}`;
+  return /rate limit/i.test(message);
+}
+
+/**
+ * @param {string} url
+ * @param {RequestInit & {headers?: Record<string, string>}} [options={}]
+ */
 async function fetchJson(url, options = {}) {
-  const headers = {
+  const headers = /** @type {Record<string, string>} */ ({
     Authorization: authHeader,
     ...(options.headers || {}),
-  };
+  });
+
+  if (options.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
 
   const response = await fetch(url, { ...options, headers });
+  const responseText = await response
+    .text()
+    .catch(() => "<unable to read response>");
 
   if (!response.ok) {
-    const errorText = await response
-      .text()
-      .catch(() => "<unable to read response>");
-    throw new Error(
-      `Request failed ${response.status} ${response.statusText}: ${errorText}`
+    throw buildRequestError(
+      response.status,
+      response.statusText,
+      responseText
     );
   }
 
   if (response.status === 204) return null;
-  return response.json();
+  return parseJsonResponse(responseText);
 }
 
+/**
+ * @param {DateTime} start
+ * @param {DateTime} end
+ */
 async function getTimeEntries(start, end) {
   const clampedStartMillis = Math.max(
     start.toMillis(),
     MIN_ENTRY_DATE.toMillis()
   );
   const clampedStart = DateTime.fromMillis(clampedStartMillis).toUTC();
-  if (clampedStart >= end.toUTC()) {
+  const endUtc = end.toUTC();
+
+  if (clampedStart >= endUtc) {
     return [];
   }
-  const url = `${API_BASE}/me/time_entries?start_date=${encodeURIComponent(
-    clampedStart.toISO()
-  )}&end_date=${encodeURIComponent(end.toUTC().toISO())}`;
+  const startIso = clampedStart.toISO();
+  const endIso = endUtc.toISO();
 
-  return fetchJson(url);
+  if (!startIso || !endIso) {
+    throw new Error("Unable to format Toggl request date range");
+  }
+
+  const url = `${API_BASE}/me/time_entries?start_date=${encodeURIComponent(
+    startIso
+  )}&end_date=${encodeURIComponent(endIso)}`;
+
+  try {
+    return fetchJson(url);
+  } catch (error) {
+    if (!isRateLimitError(error)) {
+      throw error;
+    }
+
+    console.warn(
+      "Toggl /me/time_entries was rate-limited; retrying via workspace reports endpoint."
+    );
+    return getWorkspaceReportEntries(clampedStart, endUtc);
+  }
+}
+
+/**
+ * @param {DateTime} start
+ * @param {DateTime} end
+ */
+async function getWorkspaceReportEntries(start, end) {
+  if (!TOGGL_WORKSPACE_ID) {
+    throw new Error(
+      "Toggl /me/time_entries was rate-limited, but TOGGL_WORKSPACE_ID is not configured for workspace reports fallback"
+    );
+  }
+
+  const endExclusiveLocal = end.setZone(TIMEZONE);
+  const endInclusiveLocal = endExclusiveLocal.minus({ milliseconds: 1 });
+  const requestBody = {
+    start_date: start.setZone(TIMEZONE).toFormat("yyyy-LL-dd"),
+    end_date: endInclusiveLocal.toFormat("yyyy-LL-dd"),
+    startTime: start.toISO(),
+    endTime: end.toISO(),
+    grouped: false,
+    enrich_response: true,
+    order_by: "date",
+    order_dir: "ASC",
+    page_size: 10000,
+    project_ids: TOGGL_PROJECT_ID ? [TOGGL_PROJECT_ID] : undefined,
+  };
+
+  const url = `${REPORTS_API_BASE}/workspace/${encodeURIComponent(
+    TOGGL_WORKSPACE_ID
+  )}/search/time_entries`;
+  const response = await fetchJson(url, {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
+
+  return normalizeReportEntries(response);
+}
+
+/**
+ * @param {any[]} entries
+ */
+function normalizeReportEntries(entries) {
+  if (!Array.isArray(entries)) return [];
+
+  return entries.flatMap((entryGroup) => {
+    if (Array.isArray(entryGroup?.time_entries)) {
+      return entryGroup.time_entries.map((timeEntry) => ({
+        ...timeEntry,
+        description: entryGroup.description || timeEntry.description,
+        duration:
+          typeof timeEntry.seconds === "number"
+            ? timeEntry.seconds
+            : timeEntry.duration,
+        project_id: entryGroup.project_id ?? timeEntry.project_id,
+        tags: Array.isArray(entryGroup.tag_names) ? entryGroup.tag_names : [],
+        task_id: entryGroup.task_id ?? timeEntry.task_id,
+      }));
+    }
+
+    return {
+      ...entryGroup,
+      duration:
+        typeof entryGroup.seconds === "number"
+          ? entryGroup.seconds
+          : entryGroup.duration,
+      tags: Array.isArray(entryGroup.tags)
+        ? entryGroup.tags
+        : Array.isArray(entryGroup.tag_names)
+          ? entryGroup.tag_names
+          : [],
+    };
+  });
 }
 
 function entryDurationSeconds(entry) {
@@ -175,6 +332,26 @@ function filterEntriesForProject(entries) {
   );
 }
 
+/**
+ * @param {any[]} entries
+ */
+function groupEntriesByStartDate(entries) {
+  const grouped = new Map();
+
+  for (const entry of entries || []) {
+    if (!entry?.start) continue;
+
+    const localDate = DateTime.fromISO(entry.start).setZone(TIMEZONE);
+    if (!localDate.isValid) continue;
+
+    const dateKey = localDate.toFormat("yyyy-LL-dd");
+    if (!grouped.has(dateKey)) grouped.set(dateKey, []);
+    grouped.get(dateKey).push(entry);
+  }
+
+  return grouped;
+}
+
 function buildDiscordMessage({
   todayEntries,
   todayTags,
@@ -265,11 +442,18 @@ function parseBackfillFromDate(value) {
   return parseDateField(value, "BACKFILL_FROM_DATE");
 }
 
-async function reportForDate(runDate) {
-  const dayStart = runDate.startOf("day");
-  const dayEnd = dayStart.plus({ days: 1 });
-  const entries = await getTimeEntries(dayStart, dayEnd);
-  const filteredEntries = filterEntriesForProject(entries);
+/**
+ * @param {DateTime} runDate
+ * @param {any[]} [entriesOverride]
+ */
+async function reportForDate(runDate, entriesOverride) {
+  const filteredEntries = entriesOverride
+    ? entriesOverride
+    : filterEntriesForProject(
+        await getTimeEntries(runDate.startOf("day"), runDate.startOf("day").plus({
+          days: 1,
+        }))
+      );
   const dayLabel = runDate.toFormat("LLL dd"); // e.g., Dec 12
 
   if (!filteredEntries.length) {
@@ -311,12 +495,20 @@ async function main() {
         return;
       }
 
+      const backfillEntries = filterEntriesForProject(
+        await getTimeEntries(startDate, yesterday.plus({ days: 1 }))
+      );
+      const entriesByStartDate = groupEntriesByStartDate(backfillEntries);
+
       for (
         let currentDate = startDate;
         currentDate <= yesterday;
         currentDate = currentDate.plus({ days: 1 })
       ) {
-        await reportForDate(currentDate);
+        await reportForDate(
+          currentDate,
+          entriesByStartDate.get(currentDate.toFormat("yyyy-LL-dd")) || []
+        );
       }
       return;
     }
