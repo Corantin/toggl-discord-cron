@@ -13,6 +13,7 @@ const TOGGL_PROJECT_ID = process.env.TOGGL_PROJECT_ID
   ? Number(process.env.TOGGL_PROJECT_ID)
   : undefined;
 const RUN_DATE = process.env.RUN_DATE; // optional YYYY-MM-DD date, "today", or "yesterday" for current day in TZ
+const BACKFILL_FROM_DATE = process.env.BACKFILL_FROM_DATE; // optional YYYY-MM-DD date to backfill through yesterday in TZ
 const DRY_RUN =
   process.env.DRY_RUN === "1" ||
   process.env.DRY_RUN === "true" ||
@@ -67,6 +68,9 @@ async function getTimeEntries(start, end) {
     MIN_ENTRY_DATE.toMillis()
   );
   const clampedStart = DateTime.fromMillis(clampedStartMillis).toUTC();
+  if (clampedStart >= end.toUTC()) {
+    return [];
+  }
   const url = `${API_BASE}/me/time_entries?start_date=${encodeURIComponent(
     clampedStart.toISO()
   )}&end_date=${encodeURIComponent(end.toUTC().toISO())}`;
@@ -246,39 +250,69 @@ function parseRunDate(value) {
   return parsed;
 }
 
+function parseBackfillFromDate(value) {
+  const trimmed = value.trim();
+  const parsed = DateTime.fromFormat(trimmed, "yyyy-LL-dd", { zone: TIMEZONE });
+
+  if (!parsed.isValid) {
+    throw new Error(
+      `Invalid BACKFILL_FROM_DATE provided (expected YYYY-MM-DD): ${value}`
+    );
+  }
+
+  return parsed;
+}
+
+async function reportForDate(runDate) {
+  const dayStart = runDate.startOf("day");
+  const dayEnd = dayStart.plus({ days: 1 });
+  const entries = await getTimeEntries(dayStart, dayEnd);
+  const filteredEntries = filterEntriesForProject(entries);
+  const dayLabel = runDate.toFormat("LLL dd"); // e.g., Dec 12
+
+  if (!filteredEntries.length) {
+    console.log(`No time entries for ${dayLabel}; skipping Discord post.`);
+    return;
+  }
+
+  const dayTags = summarizeByTag(filteredEntries);
+  const dayTotal = totalRoundedSeconds(filteredEntries);
+  const message = buildDiscordMessage({
+    todayEntries: filteredEntries,
+    todayTags: dayTags,
+    todayLabel: dayLabel,
+    todayTotal: dayTotal,
+  });
+
+  if (DRY_RUN) {
+    console.log(`[DRY RUN] Would post message for ${dayLabel}:\n`, message);
+    return;
+  }
+
+  await postToDiscord(message);
+  console.log(`Posted Toggl summary to Discord for ${dayLabel}`);
+}
+
 async function main() {
   try {
-    const runDate = parseRunDate(RUN_DATE);
-    const dayStart = runDate.startOf("day");
-    const dayEnd = dayStart.plus({ days: 1 });
-    const todayEntries = await getTimeEntries(dayStart, dayEnd);
+    if (BACKFILL_FROM_DATE) {
+      const startDate = parseBackfillFromDate(BACKFILL_FROM_DATE).startOf("day");
+      const yesterday = DateTime.now()
+        .setZone(TIMEZONE)
+        .minus({ days: 1 })
+        .startOf("day");
 
-    const filteredTodayEntries = filterEntriesForProject(todayEntries);
-
-    const hasTodayEntries = filteredTodayEntries.length > 0;
-
-    if (!hasTodayEntries) {
-      console.log("No time entries for today; skipping Discord post.");
+      for (
+        let currentDate = startDate;
+        currentDate <= yesterday;
+        currentDate = currentDate.plus({ days: 1 })
+      ) {
+        await reportForDate(currentDate);
+      }
       return;
     }
 
-    const todayTags = summarizeByTag(filteredTodayEntries);
-    const todayLabel = runDate.toFormat("LLL dd"); // e.g., Dec 12
-    const todayTotal = totalRoundedSeconds(filteredTodayEntries);
-
-    const message = buildDiscordMessage({
-      todayEntries: filteredTodayEntries,
-      todayTags,
-      todayLabel,
-      todayTotal,
-    });
-
-    if (DRY_RUN) {
-      console.log("[DRY RUN] Would post message:\n", message);
-    } else {
-      await postToDiscord(message);
-      console.log("Posted Toggl summary to Discord");
-    }
+    await reportForDate(parseRunDate(RUN_DATE));
   } catch (error) {
     console.error(error);
     process.exit(1);

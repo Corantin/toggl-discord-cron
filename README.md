@@ -16,6 +16,7 @@ Add these secrets in the repository settings for Actions:
 - `TOGGL_PROJECT_ID` – optional; restricts reporting to a single project id (e.g., `203141064`).
 - `DRY_RUN` – optional; set to `true` to log the message instead of posting to Discord.
 - `RUN_DATE` – optional date in `YYYY-MM-DD` (e.g., `2025-12-05`) or `today`/`yesterday` to control which day is reported.
+- `BACKFILL_FROM_DATE` – optional date in `YYYY-MM-DD` (e.g., `2025-12-01`) to post each day from that date through yesterday.
 
 ## Running locally
 ```bash
@@ -36,3 +37,4 @@ The workflow at `.github/workflows/toggl-discord.yml` runs daily at 08:00 UTC an
 - Set `DRY_RUN=true` to print the would-be Discord message and skip posting.
 - Day boundary uses America/New_York (EST/EDT); “today” is evaluated in that timezone before querying Toggl, and entries are attributed to the day they start (so cross-midnight entries stay on their start date).
 - The workflow_dispatch input `run_date` defaults to `yesterday`; provide a date in `YYYY-MM-DD` or `today`/`yesterday` to report a different day.
+- The workflow_dispatch input `backfill_from_date` posts one summary per day from the provided `YYYY-MM-DD` date through yesterday and takes precedence over `run_date`.
