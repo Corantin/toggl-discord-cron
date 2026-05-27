@@ -7,6 +7,9 @@ on:
         description: 'Date to report (YYYY-MM-DD, use "today" or "yesterday")'
         required: false
         default: yesterday
+      backfill_from_date:
+        description: "Start date to backfill from (YYYY-MM-DD, posts each day through yesterday)"
+        required: false
   schedule:
     - cron: "0 10 * * *" # 05:00 EST (10:00 UTC) daily
 
@@ -38,4 +41,5 @@ jobs:
           TOGGL_PROJECT_ID: ${{ secrets.TOGGL_PROJECT_ID }}
           DRY_RUN: ${{ secrets.DRY_RUN }}
           RUN_DATE: ${{ github.event.inputs.run_date }}
+          BACKFILL_FROM_DATE: ${{ github.event.inputs.backfill_from_date }}
         run: pnpm start
