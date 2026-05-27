@@ -229,6 +229,26 @@ async function postToDiscord(content) {
   }
 }
 
+function parseDateField(value, envName) {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    throw new Error(
+      `Invalid ${envName} provided (expected YYYY-MM-DD): empty value`
+    );
+  }
+
+  const parsed = DateTime.fromFormat(trimmed, "yyyy-LL-dd", { zone: TIMEZONE });
+
+  if (!parsed.isValid) {
+    throw new Error(
+      `Invalid ${envName} provided (expected YYYY-MM-DD): ${value}`
+    );
+  }
+
+  return parsed;
+}
+
 function parseRunDate(value) {
   if (!value || value.toLowerCase() === "yesterday") {
     return DateTime.now().setZone(TIMEZONE).minus({ days: 1 });
@@ -238,36 +258,11 @@ function parseRunDate(value) {
     return DateTime.now().setZone(TIMEZONE);
   }
 
-  const trimmed = value.trim();
-  const parsed = DateTime.fromFormat(trimmed, "yyyy-LL-dd", { zone: TIMEZONE });
-
-  if (!parsed.isValid) {
-    throw new Error(
-      `Invalid RUN_DATE provided (expected YYYY-MM-DD): ${value}`
-    );
-  }
-
-  return parsed;
+  return parseDateField(value, "RUN_DATE");
 }
 
 function parseBackfillFromDate(value) {
-  const trimmed = value?.trim();
-
-  if (!trimmed) {
-    throw new Error(
-      "Invalid BACKFILL_FROM_DATE provided (expected YYYY-MM-DD): empty value"
-    );
-  }
-
-  const parsed = DateTime.fromFormat(trimmed, "yyyy-LL-dd", { zone: TIMEZONE });
-
-  if (!parsed.isValid) {
-    throw new Error(
-      `Invalid BACKFILL_FROM_DATE provided (expected YYYY-MM-DD): ${value}`
-    );
-  }
-
-  return parsed;
+  return parseDateField(value, "BACKFILL_FROM_DATE");
 }
 
 async function reportForDate(runDate) {
@@ -302,7 +297,7 @@ async function reportForDate(runDate) {
 
 async function main() {
   try {
-    if (BACKFILL_FROM_DATE?.trim()) {
+    if (BACKFILL_FROM_DATE) {
       const startDate = parseBackfillFromDate(BACKFILL_FROM_DATE).startOf("day");
       const yesterday = DateTime.now()
         .setZone(TIMEZONE)
