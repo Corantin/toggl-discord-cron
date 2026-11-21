@@ -35,7 +35,7 @@ The separate `.github/workflows/keep-schedules-active.yml` workflow checks the l
 - The script ignores time entries before 2025-12-04 to avoid processing older Toggl data.
 - When `TOGGL_PROJECT_ID` is set, only that project’s entries are included in the report.
 - If there are no entries for a day, that day is skipped without posting to Discord.
-- Labels/tags on entries are included; the message lists entries grouped under each label with a single total for the day.
+- Labels/tags on entries are included; entries with multiple tags appear once under a combined label. Durations use the exact tracked time, with a single total for the day.
 - Set `DRY_RUN=true` to print the would-be Discord message and skip posting.
 - Day boundary uses America/New_York (EST/EDT); “today” is evaluated in that timezone before querying Toggl, and entries are attributed to the day they start (so cross-midnight entries stay on their start date).
 - The workflow_dispatch input `run_date` defaults to `yesterday`; provide a date in `YYYY-MM-DD` or `today`/`yesterday` to report a different day.

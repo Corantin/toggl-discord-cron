@@ -14,6 +14,8 @@ const TOGGL_PROJECT_ID = process.env.TOGGL_PROJECT_ID
   : undefined;
 const RUN_DATE = process.env.RUN_DATE; // optional YYYY-MM-DD date, "today", or "yesterday" for current day in TZ
 const BACKFILL_FROM_DATE = process.env.BACKFILL_FROM_DATE; // optional YYYY-MM-DD date to backfill through yesterday in TZ
+// Older entries outside the Oct-Nov 2026 allocation remain in Toggl but are not reported to Discord.
+const EXCLUDED_TIME_ENTRY_IDS = new Set([4592902647, 4600555391, 4605201487]);
 const DRY_RUN =
   process.env.DRY_RUN === "1" ||
   process.env.DRY_RUN === "true" ||
@@ -246,12 +248,6 @@ function entryDurationSeconds(entry) {
   return Math.max(0, Math.floor((Date.now() - start) / 1000));
 }
 
-function roundToNearestFiveMinutes(seconds) {
-  // Enforce 5-minute minimum for any positive duration
-  if (seconds <= 0) return 0;
-  return Math.max(300, Math.round(seconds / 300) * 300);
-}
-
 function formatDuration(totalSeconds) {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -262,21 +258,20 @@ function formatDuration(totalSeconds) {
   return `${seconds}s`;
 }
 
+function entryLabel(entry) {
+  const tags = Array.isArray(entry.tags)
+    ? [...new Set(entry.tags.filter((tag) => typeof tag === "string" && tag))]
+    : [];
+  return tags.length ? tags.join(" · ") : "(no label)";
+}
+
 function summarizeByTag(entries) {
   const totals = new Map();
 
   for (const entry of entries || []) {
-    const seconds = roundToNearestFiveMinutes(entryDurationSeconds(entry));
-    const tags = Array.isArray(entry.tags) ? entry.tags : [];
-    if (!tags.length) {
-      if (!totals.has("(no label)")) totals.set("(no label)", 0);
-      totals.set("(no label)", totals.get("(no label)") + seconds);
-      continue;
-    }
-    for (const tag of tags) {
-      if (!totals.has(tag)) totals.set(tag, 0);
-      totals.set(tag, totals.get(tag) + seconds);
-    }
+    const seconds = entryDurationSeconds(entry);
+    const label = entryLabel(entry);
+    totals.set(label, (totals.get(label) || 0) + seconds);
   }
 
   return Array.from(totals.entries())
@@ -284,10 +279,9 @@ function summarizeByTag(entries) {
     .sort((a, b) => b.seconds - a.seconds);
 }
 
-function totalRoundedSeconds(entries) {
+function totalEntrySeconds(entries) {
   return (entries || []).reduce(
-    (sum, entry) =>
-      sum + roundToNearestFiveMinutes(entryDurationSeconds(entry)),
+    (sum, entry) => sum + entryDurationSeconds(entry),
     0
   );
 }
@@ -295,14 +289,9 @@ function totalRoundedSeconds(entries) {
 function groupEntriesByTag(entries) {
   const grouped = new Map();
   for (const entry of entries || []) {
-    const tags =
-      Array.isArray(entry.tags) && entry.tags.length
-        ? entry.tags
-        : ["(no label)"];
-    for (const tag of tags) {
-      if (!grouped.has(tag)) grouped.set(tag, []);
-      grouped.get(tag).push(entry);
-    }
+    const label = entryLabel(entry);
+    if (!grouped.has(label)) grouped.set(label, []);
+    grouped.get(label).push(entry);
   }
   return grouped;
 }
@@ -312,12 +301,10 @@ function aggregateByDescription(entries) {
 
   for (const entry of entries || []) {
     const desc = entry.description || "No description";
-    const roundedSeconds = roundToNearestFiveMinutes(
-      entryDurationSeconds(entry)
-    );
+    const seconds = entryDurationSeconds(entry);
 
     if (!byDesc.has(desc)) byDesc.set(desc, 0);
-    byDesc.set(desc, byDesc.get(desc) + roundedSeconds);
+    byDesc.set(desc, byDesc.get(desc) + seconds);
   }
 
   return Array.from(byDesc.entries())
@@ -326,9 +313,10 @@ function aggregateByDescription(entries) {
 }
 
 function filterEntriesForProject(entries) {
-  if (!TOGGL_PROJECT_ID) return entries || [];
   return (entries || []).filter(
-    (entry) => entry.project_id === TOGGL_PROJECT_ID
+    (entry) =>
+      !EXCLUDED_TIME_ENTRY_IDS.has(entry.id) &&
+      (!TOGGL_PROJECT_ID || entry.project_id === TOGGL_PROJECT_ID)
   );
 }
 
@@ -462,7 +450,7 @@ async function reportForDate(runDate, entriesOverride) {
   }
 
   const dayTags = summarizeByTag(filteredEntries);
-  const dayTotal = totalRoundedSeconds(filteredEntries);
+  const dayTotal = totalEntrySeconds(filteredEntries);
   const message = buildDiscordMessage({
     todayEntries: filteredEntries,
     todayTags: dayTags,
