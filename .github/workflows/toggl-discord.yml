@@ -10,8 +10,16 @@ on:
       backfill_from_date:
         description: "Start date to backfill from (YYYY-MM-DD, posts each day through yesterday)"
         required: false
+      backfill_since_last_successful_run:
+        description: "Backfill since last successful scheduled run (ignores run_date)"
+        type: boolean
+        default: false
   schedule:
     - cron: "0 10 * * *" # 05:00 EST (10:00 UTC) daily
+
+permissions:
+  actions: read
+  contents: read
 
 jobs:
   report:
@@ -32,6 +40,36 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Find last successful scheduled run
+        id: automatic_backfill
+        if: ${{ inputs.backfill_since_last_successful_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_START_DATE: ${{ inputs.backfill_from_date }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "$MANUAL_START_DATE" ]]; then
+            echo "Choose either automatic backfill or a manual backfill start date." >&2
+            exit 1
+          fi
+
+          last_run_started_at=$(gh api -X GET \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/toggl-discord.yml/runs" \
+            -f event=schedule -f status=success -f per_page=1 \
+            --jq '.workflow_runs[0].run_started_at // .workflow_runs[0].created_at // empty')
+
+          if [[ -z "$last_run_started_at" ]]; then
+            echo "No successful scheduled run found; enter backfill_from_date instead." >&2
+            exit 1
+          fi
+
+          # The last run reported the previous New York calendar day.
+          start_date=$(TZ=America/New_York date -d "$last_run_started_at" +%F)
+          echo "start_date=$start_date" >> "$GITHUB_OUTPUT"
+          echo "Backfilling from $start_date through yesterday."
+
       - name: Post Toggl summary to Discord
         env:
           TOGGL_TOKEN: ${{ secrets.TOGGL_TOKEN }}
@@ -41,5 +79,5 @@ jobs:
           TOGGL_PROJECT_ID: ${{ secrets.TOGGL_PROJECT_ID }}
           DRY_RUN: ${{ secrets.DRY_RUN }}
           RUN_DATE: ${{ github.event.inputs.run_date }}
-          BACKFILL_FROM_DATE: ${{ github.event.inputs.backfill_from_date }}
+          BACKFILL_FROM_DATE: ${{ steps.automatic_backfill.outputs.start_date || inputs.backfill_from_date }}
         run: pnpm start
