@@ -26,7 +26,9 @@ TOGGL_TOKEN=xxx DISCORD_WEBHOOK=xxx TOGGL_WORKSPACE_ID=123 TOGGL_PROJECT_ID=2031
 ```
 
 ## Schedule
-The workflow at `.github/workflows/toggl-discord.yml` runs daily at 08:00 UTC and can also be triggered manually (`workflow_dispatch`). Update the cron as needed.
+The workflow at `.github/workflows/toggl-discord.yml` runs daily at 10:00 UTC and can also be triggered manually (`workflow_dispatch`). Update the cron as needed.
+
+The separate `.github/workflows/keep-schedules-active.yml` workflow checks the latest commit on `main` daily at 02:37 UTC. After 45 days without a commit, it pushes an empty commit using the repository's `GITHUB_TOKEN`, ahead of GitHub's 60-day inactivity cutoff for scheduled workflows in public repositories. It can also be triggered manually. GitHub must allow Actions to write to `main`; the keepalive run will fail visibly if the push is blocked. A disabled scheduled workflow must be enabled once before its schedule can run again.
 
 ## Notes
 - Each message summarizes a single day’s entries; no weekly totals are posted.

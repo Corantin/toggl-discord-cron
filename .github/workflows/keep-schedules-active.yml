@@ -1,0 +1,41 @@
+name: Keep scheduled workflows active
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "37 2 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: keep-schedules-active
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Commit after 45 days without repository changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Check the current default branch, not the commit that started this run.
+          git fetch origin main
+          git switch -C main origin/main
+
+          last_commit=$(git log -1 --format=%ct)
+          now=$(date -u +%s)
+          if (( now - last_commit < 45 * 24 * 60 * 60 )); then
+            echo "Latest commit is less than 45 days old; no keepalive needed."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keep scheduled workflows active"
+          git push origin HEAD:main
