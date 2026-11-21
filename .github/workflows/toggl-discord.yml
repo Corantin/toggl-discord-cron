@@ -1,4 +1,5 @@
 name: Toggl to Discord
+run-name: ${{ github.event_name == 'workflow_dispatch' && !inputs.backfill_since_last_successful_run && inputs.backfill_from_date == '' && inputs.run_date != '' && inputs.run_date != 'yesterday' && 'Manual custom date report' || 'Toggl to Discord' }}
 
 on:
   workflow_dispatch:
@@ -11,7 +12,7 @@ on:
         description: "Start date to backfill from (YYYY-MM-DD, posts each day through yesterday)"
         required: false
       backfill_since_last_successful_run:
-        description: "Backfill since last successful scheduled run (ignores run_date)"
+        description: "Backfill since latest successful run (ignores run_date)"
         type: boolean
         default: false
   schedule:
@@ -40,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Find last successful scheduled run
+      - name: Find last successful run
         id: automatic_backfill
         if: ${{ inputs.backfill_since_last_successful_run }}
         env:
@@ -57,15 +58,15 @@ jobs:
 
           last_run_started_at=$(gh api -X GET \
             "repos/${GITHUB_REPOSITORY}/actions/workflows/toggl-discord.yml/runs" \
-            -f event=schedule -f status=success -f per_page=1 \
-            --jq '.workflow_runs[0].run_started_at // .workflow_runs[0].created_at // empty')
+            -f status=success -f per_page=100 \
+            --jq '[.workflow_runs[] | select(.display_title != "Manual custom date report")][0] | .run_started_at // .created_at // empty')
 
           if [[ -z "$last_run_started_at" ]]; then
-            echo "No successful scheduled run found; enter backfill_from_date instead." >&2
+            echo "No successful run found; enter backfill_from_date instead." >&2
             exit 1
           fi
 
-          # The last run reported the previous New York calendar day.
+          # Scheduled runs and full backfills cover through the previous New York day.
           start_date=$(TZ=America/New_York date -d "$last_run_started_at" +%F)
           echo "start_date=$start_date" >> "$GITHUB_OUTPUT"
           echo "Backfilling from $start_date through yesterday."
