@@ -1,5 +1,5 @@
 name: Toggl to Discord
-run-name: ${{ github.event_name == 'workflow_dispatch' && !inputs.backfill_since_last_successful_run && inputs.backfill_from_date == '' && inputs.run_date != '' && inputs.run_date != 'yesterday' && 'Manual custom date report' || 'Toggl to Discord' }}
+run-name: ${{ github.event_name == 'schedule' && 'Toggl to Discord' || (inputs.backfill_since_last_successful_run || inputs.backfill_from_date != '') && 'Toggl backfill' || (inputs.run_date == '' || inputs.run_date == 'yesterday') && 'Manual yesterday report' || 'Manual custom date report' }}
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         required: false
         default: yesterday
       backfill_from_date:
-        description: "Start date to backfill from (YYYY-MM-DD, posts each day through yesterday)"
+        description: "Start date to backfill from (YYYY-MM-DD, stops before the next daily report)"
         required: false
       backfill_since_last_successful_run:
         description: "Backfill since latest successful run (ignores run_date)"
@@ -56,20 +56,70 @@ jobs:
             exit 1
           fi
 
-          last_run_started_at=$(gh api -X GET \
+          last_run=$(gh api -X GET \
             "repos/${GITHUB_REPOSITORY}/actions/workflows/toggl-discord.yml/runs" \
             -f status=success -f per_page=100 \
-            --jq '[.workflow_runs[] | select(.display_title != "Manual custom date report")][0] | .run_started_at // .created_at // empty')
+            --jq '[.workflow_runs[] | select(.display_title != "Manual custom date report")][0] | {started_at: (.run_started_at // .created_at), title: .display_title}')
+
+          last_run_started_at=$(jq -r '.started_at // empty' <<< "$last_run")
 
           if [[ -z "$last_run_started_at" ]]; then
             echo "No successful run found; enter backfill_from_date instead." >&2
             exit 1
           fi
 
-          # Scheduled runs and full backfills cover through the previous New York day.
+          # A backfill before the daily cron stops one day earlier than a scheduled report.
           start_date=$(TZ=America/New_York date -d "$last_run_started_at" +%F)
+          if [[ $(jq -r '.title' <<< "$last_run") == "Toggl backfill" ]]; then
+            run_started_epoch=$(date -u -d "$last_run_started_at" +%s)
+            scheduled_epoch=$(date -u -d "$start_date 10:00:00 UTC" +%s)
+            if (( run_started_epoch < scheduled_epoch )); then
+              start_date=$(TZ=America/New_York date -d "$start_date 12:00:00 yesterday" +%F)
+            fi
+          fi
           echo "start_date=$start_date" >> "$GITHUB_OUTPUT"
-          echo "Backfilling from $start_date through yesterday."
+          echo "Backfilling from $start_date through the last day not handled by the daily schedule."
+
+      - name: Check today's scheduled report
+        id: scheduled_report
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.backfill_since_last_successful_run || inputs.backfill_from_date != '') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The daily cron is 10:00 UTC. Before then, the script excludes yesterday.
+          local_today=$(TZ=America/New_York date +%F)
+          scheduled_epoch=$(date -u -d "$local_today 10:00:00 UTC" +%s)
+          run_started_at=$(gh api -X GET \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --jq '.run_started_at // .created_at')
+          run_started_epoch=$(date -u -d "$run_started_at" +%s)
+          if (( run_started_epoch < scheduled_epoch )); then
+            echo "skip_yesterday=true" >> "$GITHUB_OUTPUT"
+            echo "The daily report is not due yet; backfill will stop at the day before yesterday."
+            exit 0
+          fi
+
+          scheduled_runs=$(gh api -X GET \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/toggl-discord.yml/runs" \
+            -f event=schedule -f per_page=30 |
+            jq -c --arg today "$local_today" \
+              '[.workflow_runs[] | select(.created_at[0:10] == $today)]')
+
+          pending_run=$(jq -r '[.[] | select(.status != "completed")][0].id // empty' <<< "$scheduled_runs")
+          if [[ -n "$pending_run" ]]; then
+            echo "Scheduled run $pending_run is still pending; retry the backfill after it finishes." >&2
+            exit 1
+          fi
+
+          scheduled_run=$(jq -r '[.[] | select(.conclusion == "success")][0].id // empty' <<< "$scheduled_runs")
+
+          if [[ -n "$scheduled_run" ]]; then
+            echo "skip_yesterday=true" >> "$GITHUB_OUTPUT"
+            echo "Scheduled run $scheduled_run is already handling yesterday."
+          fi
 
       - name: Post Toggl summary to Discord
         env:
@@ -81,4 +131,5 @@ jobs:
           DRY_RUN: ${{ secrets.DRY_RUN }}
           RUN_DATE: ${{ github.event.inputs.run_date }}
           BACKFILL_FROM_DATE: ${{ steps.automatic_backfill.outputs.start_date || inputs.backfill_from_date }}
+          BACKFILL_SKIP_YESTERDAY: ${{ steps.scheduled_report.outputs.skip_yesterday }}
         run: pnpm start

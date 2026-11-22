@@ -16,7 +16,7 @@ Add these secrets in the repository settings for Actions:
 - `TOGGL_PROJECT_ID` – optional; restricts reporting to a single project id (e.g., `203141064`).
 - `DRY_RUN` – optional; set to `true` to log the message instead of posting to Discord.
 - `RUN_DATE` – optional date in `YYYY-MM-DD` (e.g., `2025-12-05`) or `today`/`yesterday` to control which day is reported.
-- `BACKFILL_FROM_DATE` – optional date in `YYYY-MM-DD` (e.g., `2025-12-01`) to post each day from that date through yesterday.
+- `BACKFILL_FROM_DATE` – optional date in `YYYY-MM-DD` (e.g., `2025-12-01`) to post each day from that date through the last day not reserved for the daily schedule.
 
 ## Running locally
 ```bash
@@ -39,5 +39,5 @@ The separate `.github/workflows/keep-schedules-active.yml` workflow checks the l
 - Set `DRY_RUN=true` to print the would-be Discord message and skip posting.
 - Day boundary uses America/New_York (EST/EDT); “today” is evaluated in that timezone before querying Toggl, and entries are attributed to the day they start (so cross-midnight entries stay on their start date).
 - The workflow_dispatch input `run_date` defaults to `yesterday`; provide a date in `YYYY-MM-DD` or `today`/`yesterday` to report a different day.
-- The workflow_dispatch input `backfill_from_date` posts one summary per day from the provided `YYYY-MM-DD` date through yesterday and takes precedence over `run_date`.
-- For a manual catch-up, check `backfill_since_last_successful_run`. The workflow finds the newest successful scheduled run, full backfill, or manual `yesterday` report and starts on that run's date in America/New_York, since it covered through the previous day. It posts through yesterday and ignores `run_date`. Single-day manual runs with a custom `run_date` are not used as a checkpoint. Leave `backfill_from_date` blank when using this option. If no successful run exists, enter a start date manually. A successful run may have skipped posting when there were no entries or when `DRY_RUN` was enabled.
+- The workflow_dispatch input `backfill_from_date` posts one summary per day from the provided `YYYY-MM-DD` date through the last day not reserved for the daily schedule, and takes precedence over `run_date`. Before the 10:00 UTC cron time on the current New York date, backfills stop at the day before yesterday so the upcoming scheduled run can post yesterday. After 10:00 UTC, they may include yesterday if no scheduled run for that date succeeded. If that run is still pending, the backfill fails so it can be retried after the scheduled run finishes. GitHub can delay scheduled runs, so this check uses the run history available when the backfill starts.
+- For a manual catch-up, check `backfill_since_last_successful_run`. The workflow finds the newest successful scheduled run, full backfill, or manual `yesterday` report and starts after the last day it covered. A backfill completed before the 10:00 UTC cron is recognized as ending one day earlier. It uses the same backfill end-date rule and ignores `run_date`. Single-day manual runs with a custom `run_date` are not used as a checkpoint. Leave `backfill_from_date` blank when using this option. If no successful run exists, enter a start date manually. A successful run may have skipped posting when there were no entries or when `DRY_RUN` was enabled.

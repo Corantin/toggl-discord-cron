@@ -5,7 +5,8 @@
   "description": "Fetch Toggl time entries and post daily summaries to Discord via GitHub Actions.",
   "main": "toggl-discord.js",
   "scripts": {
-    "start": "node toggl-discord.js"
+    "start": "node toggl-discord.js",
+    "test": "node --test"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

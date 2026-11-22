@@ -2,6 +2,7 @@
 
 require("dotenv").config();
 const { DateTime } = require("luxon");
+const { backfillEndDate } = require("./backfill-end-date");
 
 const TOGGL_TOKEN = process.env.TOGGL_TOKEN;
 const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
@@ -13,7 +14,8 @@ const TOGGL_PROJECT_ID = process.env.TOGGL_PROJECT_ID
   ? Number(process.env.TOGGL_PROJECT_ID)
   : undefined;
 const RUN_DATE = process.env.RUN_DATE; // optional YYYY-MM-DD date, "today", or "yesterday" for current day in TZ
-const BACKFILL_FROM_DATE = process.env.BACKFILL_FROM_DATE; // optional YYYY-MM-DD date to backfill through yesterday in TZ
+const BACKFILL_FROM_DATE = process.env.BACKFILL_FROM_DATE; // optional YYYY-MM-DD date to backfill through the safe cutoff in TZ
+const BACKFILL_SKIP_YESTERDAY = process.env.BACKFILL_SKIP_YESTERDAY === "true";
 // Older entries outside the Oct-Nov 2026 allocation remain in Toggl but are not reported to Discord.
 const EXCLUDED_TIME_ENTRY_IDS = new Set([4592902647, 4600555391, 4605201487]);
 const DRY_RUN =
@@ -471,26 +473,27 @@ async function main() {
   try {
     if (BACKFILL_FROM_DATE) {
       const startDate = parseBackfillFromDate(BACKFILL_FROM_DATE).startOf("day");
-      const yesterday = DateTime.now()
-        .setZone(TIMEZONE)
-        .minus({ days: 1 })
-        .startOf("day");
+      const endDate = backfillEndDate(
+        DateTime.now(),
+        TIMEZONE,
+        BACKFILL_SKIP_YESTERDAY
+      );
 
-      if (startDate > yesterday) {
+      if (startDate > endDate) {
         console.log(
-          "BACKFILL_FROM_DATE is after yesterday; skipping Discord posts."
+          "BACKFILL_FROM_DATE is after the last day available for backfill; skipping Discord posts."
         );
         return;
       }
 
       const backfillEntries = filterEntriesForProject(
-        await getTimeEntries(startDate, yesterday.plus({ days: 1 }))
+        await getTimeEntries(startDate, endDate.plus({ days: 1 }))
       );
       const entriesByStartDate = groupEntriesByStartDate(backfillEntries);
 
       for (
         let currentDate = startDate;
-        currentDate <= yesterday;
+        currentDate <= endDate;
         currentDate = currentDate.plus({ days: 1 })
       ) {
         await reportForDate(
